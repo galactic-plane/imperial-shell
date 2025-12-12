@@ -379,6 +379,16 @@ class ImperialShell:
         # Background music for login screen
         self.login_music_playing = False
         
+        # Create a persistent event loop for async operations
+        try:
+            self.loop = asyncio.get_event_loop()
+            if self.loop.is_closed():
+                self.loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(self.loop)
+        except RuntimeError:
+            self.loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(self.loop)
+        
         if not self.VOICE_MODE:
             print(f"{Fore.YELLOW}⚙ VOICE MODE DISABLED - Text-only mode for testing{Style.RESET_ALL}\n")
         
@@ -684,9 +694,21 @@ Keep responses brief and strategic. Let the menu system handle command organizat
             temp_file = fp.name
         
         try:
+            # Create the communicate object
             communicate = edge_tts.Communicate(text, self.voice)
+            
+            # Save to temp file
             await communicate.save(temp_file)
             
+            # Verify the file was created and has content
+            if not os.path.exists(temp_file):
+                raise Exception("Audio file was not created")
+            
+            file_size = os.path.getsize(temp_file)
+            if file_size == 0:
+                raise Exception("Audio file is empty - Edge TTS may have failed to generate audio")
+            
+            # Load and play the audio
             pygame.mixer.music.load(temp_file)
             pygame.mixer.music.play()
             
@@ -694,15 +716,22 @@ Keep responses brief and strategic. Let the menu system handle command organizat
                 await asyncio.sleep(0.1)
         except Exception as e:
             print(f"{Fore.YELLOW}⚠ Audio playback error: {e}{Style.RESET_ALL}")
+            self.log_runtime(f"ERROR - Audio playback: {e}")
         finally:
             try:
-                os.unlink(temp_file)
+                if os.path.exists(temp_file):
+                    os.unlink(temp_file)
             except:
                 pass
     
     def speak(self, text):
         """Synchronous wrapper for speak_async"""
-        asyncio.run(self.speak_async(text))
+        if self.loop.is_running():
+            # If loop is already running, schedule the coroutine
+            asyncio.ensure_future(self.speak_async(text), loop=self.loop)
+        else:
+            # Run the coroutine in the event loop
+            self.loop.run_until_complete(self.speak_async(text))
     
     def listen(self, timeout=300):
         """Listen for voice input"""
