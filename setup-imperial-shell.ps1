@@ -1032,7 +1032,7 @@ Keep responses brief and strategic. Let the menu system handle command organizat
                 password = getpass.getpass(f"{Fore.CYAN}│ {Fore.WHITE}⬢ NEURAL KEY:{Style.RESET_ALL} ")
                 print(f"{Fore.CYAN}└{'─' * 58}{Style.RESET_ALL}")
                 
-                if username.lower() == "vador" and password == "Password123$":
+                if username.lower() == "vader" and password == "Password123$":
                     # Stop login music on successful authentication
                     self.stop_login_music()
                     

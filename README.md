@@ -94,7 +94,7 @@ When you first launch Freya, you'll see:
 - Authentication prompt
 
 **Default Credentials:**
-- **Username:** `vador`
+- **Username:** `vader`
 - **Password:** `Password123$`
 
 **Warning:** Enter the wrong password 3 times and Order 66 will be executed!
