@@ -1,445 +1,177 @@
-# WinDragon Maintenance Script - vBeta
+# WinDragon Maintenance Script - v2.0.0
 # Author: Daniel Penrod
-# This script provides an interactive menu-driven interface for performing various maintenance tasks on a Windows machine.
-# Tasks include backup, repair, cleanup, drive optimization, or all tasks sequentially.
+#
+# A menu-driven front end for a full, auditable Windows 11 maintenance pass. The maintenance
+# engine (29 tasks across Baseline, Integrity, Storage, Servicing, Security, Cleanup and
+# Diagnostics, plus console/JSON/HTML reporting) is a one-to-one replica of the Imperial
+# Maintenance Protocol (vader\Invoke-ImperialMaintenance.ps1); only the interface differs.
+#
+# Supported Operating Systems: Windows 11 (build 22000+), validated against 24H2 / 25H2 / 26H2.
+# Shell: PowerShell 7.x preferred; remains compatible with Windows PowerShell 5.1.
+# Privileges: Administrator required (self-elevates unless -NoElevatePrompt).
+#
+# How to run
+#   Interactive menu (default when none of -RunChoice / -Level / -OnlyTask is given):
+#     .\winDragon.ps1
+#     Any switch passed on the command line (e.g. -UpgradeApps) pre-sets the matching menu option.
+#
+#   Unattended - same behaviour and parameters as Invoke-ImperialMaintenance.ps1:
+#     .\winDragon.ps1 -Level Audit
+#     .\winDragon.ps1 -Level Full -InstallWindowsUpdates -UpgradeApps -IncludeDefenderScan
+#     .\winDragon.ps1 -OnlyTask 'DISM*','SFC*' -Verbose
+#     .\winDragon.ps1 -WhatIf -Level Standard
+#     .\winDragon.ps1 -ListTasks
+#     .\winDragon.ps1 -RegisterScheduledTask
+#
+#   Unattended by menu number (used by launcher.ps1):
+#     .\winDragon.ps1 -RunChoice 1    Audit pass
+#     .\winDragon.ps1 -RunChoice 2    Quick pass
+#     .\winDragon.ps1 -RunChoice 3    Standard pass
+#     .\winDragon.ps1 -RunChoice 4    Full pass
+#     .\winDragon.ps1 -RunChoice 8    List task catalogue
+#     .\winDragon.ps1 -RunChoice 9    Register weekly scheduled task
+#     Options 5-7 (category picker, task picker, options) are interactive-only.
+#
+# Notes for build.py: this file is comment-stripped line by line when bundled, so keep code
+# here free of block comments and of the hash character inside strings. Module files are
+# copied verbatim and are not subject to that restriction.
 
-# Supported Operating Systems:
-# - Windows 11
-# Note: This script relies on PowerShell commands and tools like DISM, Robocopy, and SFC, which are supported on the above-listed versions of Windows.
+[CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'Medium')]
+param(
+    [ValidateSet('Audit', 'Quick', 'Standard', 'Full')]
+    [string]$Level = 'Standard',
 
-# How to Run the Script:
-# 1. Open PowerShell as an Administrator.
-# 2. Navigate to the directory where this script is located.
-#    - Use the 'cd' command to change directories. Example: `cd C:\path\to\script`
-# 3. Run the script by typing: `\.\WinDragon.ps1`
-# 4. Follow the interactive prompts to select the tasks you wish to perform.
+    [string[]]$SkipTask,
+    [string[]]$OnlyTask,
+    [switch]$ListTasks,
 
-# Script Options and Corresponding Parameters
+    [switch]$InstallWindowsUpdates,
+    [switch]$UpgradeApps,
+    [switch]$IncludeDefenderScan,
+    [switch]$ScheduleChkdsk,
+    [switch]$ResetComponentStoreBase,
+    [switch]$RepairWindowsUpdateStack,
+    [switch]$UseDiskCleanup,
+    [switch]$SkipRestorePoint,
 
-# 1. Mirror Backup
-# Command: .\WinDragon.ps1 -RunChoice 1
+    [string]$DismSource,
 
-# 2. Repair Tasks (DISM and SFC)
-# Command: .\WinDragon.ps1 -RunChoice 2
+    [ValidateRange(1, 90)]
+    [int]$EventLogDays = 7,
 
-# 3. Update Installed Software
-# Command: .\WinDragon.ps1 -RunChoice 3
+    [string]$LogRoot = (Join-Path $env:ProgramData 'WinDragonMaintenance'),
 
-# 4. Cleanup Tasks
-# Command: .\WinDragon.ps1 -RunChoice 4
+    [switch]$RegisterScheduledTask,
+    [switch]$NoElevatePrompt,
 
-# 5. Drive Optimization
-# Command: .\WinDragon.ps1 -RunChoice 5
-
-# 6. Get System Information
-# Command: .\WinDragon.ps1 -RunChoice 6
-
-# 7. Analyze Event Logs
-# Command: .\WinDragon.ps1 -RunChoice 7
-
-# 8. Perform All Tasks (Except Mirror Backup)
-# Command: .\WinDragon.ps1 -RunChoice 8
-
-# 9. Perform All Tasks (Including Mirror Backup)
-# Command: .\WinDragon.ps1 -RunChoice 9
-
-# 10. Exit
-# This option is not applicable when using parameters.
-
-# Examples
-
-# Run Repair Tasks:
-# .\WinDragon.ps1 -RunChoice 2
-
-# Perform All Tasks Including Mirror Backup:
-# .\WinDragon.ps1 -RunChoice 9
-
-# Get System Information:
-# .\WinDragon.ps1 -RunChoice 6
-
-# Notes:
-# - Use these commands directly for automation or scheduling.
-# - Ensure PowerShell is run with administrative privileges.
-
-# Requirements:
-# - PowerShell 7.4.6 or newer
-# - Administrator privileges to perform system-level operations like repair, cleanup, and optimization.
-
-param (
+    [ValidateRange(1, 10)]
     [int]$RunChoice
 )
 
-# Function to ensure script is running with admin privileges
-if (-not ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] "Administrator")) {
-    Write-Host "This script must be run as an administrator. Please restart PowerShell with elevated privileges." -ForegroundColor Red
-    exit
-}
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+$ProgressPreference    = 'Continue'
 
-# Global variable for storing error records
-$global:ErrorRecords = @()
-# Global variable to ensure the quick scan runs only once
-$global:QuickScanRunOnce = $false
-# Global variable to ensure the maintenance scan runs only once
-$global:MaintenanceScanRunOnce = $false
-# Initialize timer for ETA estimation
-$global:StartTime = Get-Date  
+# Constants, output helpers, native-command infrastructure and the task engine.
+. $PSScriptRoot\Modules\Core.ps1
+# Task implementations, grouped exactly like the vader catalogue.
+. $PSScriptRoot\Modules\Baseline.ps1
+. $PSScriptRoot\Modules\Integrity.ps1
+. $PSScriptRoot\Modules\Storage.ps1
+. $PSScriptRoot\Modules\Servicing.ps1
+. $PSScriptRoot\Modules\Security.ps1
+. $PSScriptRoot\Modules\Cleanup.ps1
+. $PSScriptRoot\Modules\Diagnostics.ps1
+# Console summary and HTML report.
+. $PSScriptRoot\Modules\Reporting.ps1
+# Ordered task catalogue.
+. $PSScriptRoot\Modules\Catalogue.ps1
+# Menu-driven WinDragon interface.
+. $PSScriptRoot\Modules\Interface.ps1
 
-#####################################
-# Import the Utils Module
-. .\Modules\Utils.ps1
-#####################################
-# Utility functions for various common tasks:
-# - Initialize-Settings: Creates a settings file for default paths.
-# - Catcher: Handles errors by throwing an exception if the task name is null or empty.
-# - Write-Log: Logs messages to a log file in a dated folder.
-# - Start-DefenderScan: Runs a virus scan using Windows Defender based on the current status.
+# Lives in the entry script (not a module) so PSCommandPath resolves to this file, not a module.
+function Register-MaintenanceTask {
+    $scriptPath = $PSCommandPath
+    if (-not $scriptPath) { throw 'Cannot determine script path for scheduled task registration.' }
 
-#####################################
-# Import the Backup Module
-. .\Modules\Backup.ps1
-#####################################
-# Functions for backup operations:
-# - Get-BackupPaths: Prompts the user to enter the source and destination directories for a backup operation.
-# - Invoke-All-Backups: Initiates a backup operation using Robocopy to copy files from the source directory to a destination directory from settings file.
-
-#####################################
-# Import the Repair Module
-. .\Modules\Repair.ps1
-#####################################
-# Functions for system repair tasks:
-# - Start-Repair: Performs a series of system repair tasks using various system tools (e.g., DISM and SFC).
-
-#####################################
-# Import the Update Module
-. .\Modules\Update.ps1
-#####################################
-# Functions for updating installed software:
-# - Update-AllPackages: Installs WinGet if it is not already installed or if the installed version is outdated, and updates all installed packages.
-
-#####################################
-# Import the Cleanup Module
-. .\Modules\Cleanup.ps1
-#####################################
-# Functions for system cleanup tasks:
-# - Start-Cleanup: Executes an advanced disk cleanup using the built-in Windows tool.
-
-#####################################
-# Import the Optimize Module
-. .\Modules\Optimize.ps1
-#####################################
-# Functions for disk optimization:
-# - Start-Optimization: Performs disk optimization on all physical drives detected by the system.
-
-#####################################
-# Import the SysInfo Module
-. .\Modules\SysInfo.ps1
-#####################################
-# Functions for collecting system information:
-# - Start-PCInfo: Collects and displays detailed information about the computer's hardware and system configuration.
-
-#####################################
-# Import the SysEvents Module
-. .\Modules\SysEvents.ps1
-#####################################
-# Functions for event log analysis:
-# - Search-OnlineForInfo: Takes a message string and generates a Bing search URL for the given information.
-# - Get-EventLogEntries: Retrieves event log entries based on the specified log name and event level.
-# - Show-EventLogEntries: Displays event log entries with detailed information and logs the analysis.
-# - Start-EventLogAnalysis: Analyzes the system event logs for critical events and errors.
-#####################################
-
-# Function to show ASCII Dragon
-function Show-Dragon {
-    $dragon = @"
-                         ___====-_  _-====___
-                   _--^^^#####//      \\#####^^^--_
-                _-^##########// (    ) \\##########^-_
-               -############//  |\^^/|  \\############-
-             _/############//   (@::@)   \\############\_
-            /#############((     \\//     ))#############\
-           -###############\\    (oo)    //###############-
-          -#################\\  / "  \  //#################-
-         -###################\/      \//###################-
-        _#/|##########/\######(   /\   )######/\##########|\#_
-       |/ |#/#\#/#\/  \#/#\##\  \ \_/ /  ##/#\/#\/  \#/\#/ #\| 
-       ||/  V  '  `-'  V  \#\|  |\| | |\ |#/V  `-'   '  V  \|| 
-       |||                \#|   | | | | \|#/               |||
-       |||                 V    | | | |  V                |||
-       |||                      ' | | '                   |||
-       |||                       "  '                     |||
-       |||                                               |||
-       |||                                               |||
-       |||                                               |||
-     , |'|                                               |'| ,
-    /.\/ /                                               \ \'.\
-   /// //                                                 \ \\\\
-  ||| '\'                                                 /'/ |||
-                _   _   _   _   _   _   _   _   _  
-               / \ / \ / \ / \ / \ / \ / \ / \ / \ 
-              ( W | i | n | D | r | a | g | o | n )
-               \_/ \_/ \_/ \_/ \_/ \_/ \_/ \_/ \_/ vBeta
-"@
-    Write-Host $dragon -ForegroundColor Cyan
-}
-
-# Function: Show-Message
-# Description: Displays a message with a decorative border in yellow color.
-# Parameters: 
-#   - $message (string): The message to be displayed.
-function Show-Message {
-    param (
-        [ValidateNotNullOrEmpty()]
-        [string]$message
-    )
-    try {
-        $border = '-' * ($message.Length)
-        Write-Host "┌$border┐" -ForegroundColor White
-        Write-Host " $message " -ForegroundColor Cyan
-        Write-Host "└$border┘" -ForegroundColor White
-    }
-    catch {
-        Write-Host "An error occurred while displaying the message." -ForegroundColor Red
-    }
-}
-
-# Function: Show-Error
-# Description: Displays an error message with a decorative border in red color.
-# Parameters: 
-#   - $message (string): The error message to be displayed.
-function Show-Error {
-    param (
-        [ValidateNotNullOrEmpty()]
-        [string]$message
-    )
-    try {
-        $border = '-' * ($message.Length)
-        Write-Host "┌$border┐" -ForegroundColor Red
-        Write-Host " $message " -ForegroundColor Red
-        Write-Host "└$border┘" -ForegroundColor Red
-    }
-    catch {
-        Write-Host "An error occurred while displaying the error message." -ForegroundColor Red
-    }
-}
-
-# Function: Show-Menu
-# Description: This function displays a task menu for the user.
-#              It provides multiple options for system maintenance tasks such as backups,
-#              software updates, drive optimization, and system information retrieval.
-#              The user is prompted to enter a selection, which is then returned for further processing.
-function Show-Menu {
-    ResetConsoleScreen
-    Show-Dragon
-    Write-Host "`n"
-    Write-Host "████████████████████████████████████████████████████████████████" -ForegroundColor Cyan
-    Write-Host "                 SYSTEM TASK MENU                               " -ForegroundColor Yellow
-    Write-Host "████████████████████████████████████████████████████████████████" -ForegroundColor Cyan
-    Write-Host "" 
-    Write-Host "Please select an option:" -ForegroundColor Green
-    Write-Host "" 
-    Write-Host "  1. Start Mirror Backup" -ForegroundColor White
-    Write-Host "  2. Start Repair Tasks (DISM and SFC)" -ForegroundColor White
-    Write-Host "  3. Update Installed Software" -ForegroundColor White
-    Write-Host "  4. Start Cleanup Tasks" -ForegroundColor White
-    Write-Host "  5. Start Drive Optimization" -ForegroundColor White  
-    Write-Host "  6. Get System Information" -ForegroundColor White
-    Write-Host "  7. Analyze Event Logs" -ForegroundColor White
-    Write-Host "  8. Start All Tasks (Except Backup)" -ForegroundColor White
-    Write-Host "  9. Start All Tasks" -ForegroundColor White
-    Write-Host " 10. Exit" -ForegroundColor White
-    Write-Host "" 
-    Write-Host "████████████████████████████████████████████████████████████████" -ForegroundColor Cyan
-    $choice = Read-Host "Enter the number of your choice"
-    return $choice
-}
-
-function Initialize-Tasks {
-    param (
-        [string]$choice,
-        [object]$settings
-    )
-    $tasks = @()
-    switch ($choice) {
-        "1" {
-            $tasks = @(
-                { Show-AliveProgressSim -PercentComplete 100 -Message "Mirror Backup selected..." -Symbol "█" },
-                { Show-AliveProgressSim -PercentComplete 100 -Message "Perform Pre-Backup Tasks..." -Symbol "█" },
-                { Start-DefenderScan -ScanType QuickScan },
-                { Show-AliveProgressSim -PercentComplete 100 -Message "Performing Mirror Backup...." -Symbol "█" },
-                { $operationStatus += Invoke-All-Backups -settings $settings },
-                { Show-AliveProgressSim -PercentComplete 100 -Message "Mirror Backup Complete...." -Symbol "█" }
-            )
-        }
-        "2" {
-            $tasks = @(
-                { Show-AliveProgressSim -PercentComplete 100 -Message "Repair tasks selected..." -Symbol "█" },
-                { Show-AliveProgressSim -PercentComplete 100 -Message "Perform Pre-Repair Tasks..." -Symbol "█" },
-                { Start-DefenderScan -ScanType QuickScan },
-                { Show-AliveProgressSim -PercentComplete 100 -Message "Starting Windows Maintenance..." -Symbol "█" },
-                { Start-WindowsMaintenance },
-                { Show-AliveProgressSim -PercentComplete 100 -Message "Executing Repair..." -Symbol "█" },
-                { $operationStatus += Start-Repair },
-                { Show-AliveProgressSim -PercentComplete 100 -Message "Repair Completed." -Symbol "█" }
-            )
-        }
-        "3" {
-            $tasks = @(
-                { Show-AliveProgressSim -PercentComplete 100 -Message "Update Apps tasks selected..." -Symbol "█" },
-                { Show-AliveProgressSim -PercentComplete 100 -Message "Perform Pre-UpdateApps Tasks..." -Symbol "█" },
-                { Start-DefenderScan -ScanType QuickScan },              
-                { Show-AliveProgressSim -PercentComplete 100 -Message "Updating Apps..." -Symbol "█" },
-                { $operationStatus += Update-AllPackages },
-                { Show-AliveProgressSim -PercentComplete 100 -Message "Update Completed." -Symbol "█" }
-            )
-        }
-        "4" {
-            $tasks = @(
-                { Show-AliveProgressSim -PercentComplete 100 -Message "Cleanup tasks selected..." -Symbol "█" },
-                { Show-AliveProgressSim -PercentComplete 100 -Message "Perform Pre-Cleanup Tasks..." -Symbol "█" },
-                { Start-DefenderScan -ScanType QuickScan },               
-                { Show-AliveProgressSim -PercentComplete 100 -Message "Cleaning initialized..." -Symbol "█" },
-                { $operationStatus += Start-Cleanup },
-                { 
-                    $folderName = "cache"
-                    $result = Get-TempDirectories -FolderName $folderName 
-                    Write-Host $result
-                    Clear-TempFolders -JsonResults $result
-                    $folderName = "temp"
-                    $result = Get-TempDirectories -FolderName $folderName 
-                    Write-Host $result
-                    Clear-TempFolders -JsonResults $result                              
-                },
-                { Show-AliveProgressSim -PercentComplete 100 -Message "Cleanup Completed." -Symbol "█" }
-            )
-        }
-        "5" {
-            $tasks = @(
-                { Show-AliveProgressSim -PercentComplete 100 -Message "Drive optimization selected..." -Symbol "█" },
-                { Show-AliveProgressSim -PercentComplete 100 -Message "Perform Pre-Optimization Tasks..." -Symbol "█" },
-                { Start-DefenderScan -ScanType QuickScan },               
-                { Show-AliveProgressSim -PercentComplete 100 -Message "Optimizing Drives..." -Symbol "█" },
-                { $operationStatus += Start-Optimization },
-                { Show-AliveProgressSim -PercentComplete 100 -Message "Optimization Completed." -Symbol "█" }
-            )
-        }
-        "6" {
-            $tasks = @(                
-                { Show-AliveProgressSim -PercentComplete 100 -Message "Getting Computer Information..." -Symbol "█" },
-                { Start-PCInfo },
-                { Show-AliveProgressSim -PercentComplete 100 -Message "Information Retrieved." -Symbol "█" }
-            )
-        }
-        "7" {
-            $tasks = @(                
-                { Show-AliveProgressSim -PercentComplete 100 -Message "Analyzing Event Logs..." -Symbol "█" },
-                { Start-EventLogAnalysis },
-                { Show-AliveProgressSim -PercentComplete 100 -Message "Event Log Analysis Completed." -Symbol "█" }
-            )
-        }
-        "8" {
-            $tasks = @(                
-                { Show-AliveProgressSim -PercentComplete 100 -Message "Performing all tasks (Except Mirror Backup)..." -Symbol "█" },
-                { Start-DefenderScan -ScanType QuickScan },
-                { Start-WindowsMaintenance },
-                { $operationStatus += Start-Repair },
-                { $operationStatus += Update-AllPackages },
-                { $operationStatus += Start-Cleanup },
-                { $operationStatus += Start-Optimization },
-                { Start-PCInfo },
-                { Start-EventLogAnalysis },
-                { Show-AliveProgressSim -PercentComplete 100 -Message "All Selected Tasks Completed." -Symbol "█" }
-            )
-        }
-        "9" {
-            $tasks = @(                
-                { Show-AliveProgressSim -PercentComplete 100 -Message "Performing all tasks..." -Symbol "█" },
-                { Start-DefenderScan -ScanType QuickScan },
-                { Start-WindowsMaintenance },
-                { Invoke-All-Backups -settings $settings },
-                { $operationStatus += Start-Repair },
-                { $operationStatus += Update-AllPackages },
-                { $operationStatus += Start-Cleanup },
-                { $operationStatus += Start-Optimization },
-                { Start-PCInfo },
-                { Start-EventLogAnalysis },
-                { Show-AliveProgressSim -PercentComplete 100 -Message "All Tasks Completed." -Symbol "█" }
-            )
-        }
-        "10" {
-            ResetConsoleScreen
-            exit
-        }
-        default {
-            Write-Host "Invalid selection. Please choose an option from the menu."
-        }
-    }
-    return $tasks
-}
-
-if ($RunChoice) {
-    $settings = Initialize-Settings
-    $tasks = Initialize-Tasks -choice $RunChoice.ToString() -settings $settings
-
-    if ($tasks) {
-        Show-ProgressBar -Tasks $tasks -DelayBetweenTasks 2
+    # Prefer the machine-wide, version-independent PS7 install. A per-user/Store (MSIX) pwsh.exe
+    # lives under a version-specific WindowsApps folder that disappears on the next PS7 update,
+    # silently breaking the task, so fall back to the always-stable Windows PowerShell 5.1 instead
+    # of baking in a fragile versioned path.
+    $exe = Join-Path $env:ProgramFiles 'PowerShell\7\pwsh.exe'
+    if (-not (Test-Path $exe)) {
+        $exe = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
+        Write-Warn 'PowerShell 7 machine-wide install not found; the scheduled task will use Windows PowerShell 5.1 instead.'
     }
 
-    exit
+    $arguments = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}" -Level Standard -SkipRestorePoint' -f $scriptPath
+    $action    = New-ScheduledTaskAction -Execute $exe -Argument $arguments
+    $trigger   = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Sunday -At 3am
+    $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+    $settings  = New-ScheduledTaskSettingsSet -StartWhenAvailable -DontStopOnIdleEnd `
+                    -ExecutionTimeLimit (New-TimeSpan -Hours 4) -MultipleInstances IgnoreNew `
+                    -RestartCount 2 -RestartInterval (New-TimeSpan -Minutes 30)
+
+    Register-ScheduledTask -TaskName 'WinDragon Maintenance Protocol' `
+        -Description 'Weekly Windows 11 integrity, storage, servicing and cleanup pass.' `
+        -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
+
+    Write-Good 'Scheduled task "WinDragon Maintenance Protocol" registered (Sundays 03:00, SYSTEM).'
+    Write-Info 'Note: winget and per-user cleanup are skipped under SYSTEM. Run those interactively.'
 }
-else {
 
-    ResetConsoleScreen
+if ($ListTasks) {
+    Get-TaskCatalogueView | Format-Table -AutoSize
+    return
+}
 
-    Show-Dragon
+# --- Elevation -----------------------------------------------------------
+if (-not (Test-Elevated)) {
+    if ($NoElevatePrompt) { throw 'Administrator privileges are required. Re-run from an elevated session.' }
 
-    Write-Host "`n"
+    Write-Warn 'Administrator privileges required. Relaunching elevated...'
+    $exe = (Get-Process -Id $PID).Path
+    if (-not $exe) { $exe = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" }
 
-    # Display the disclaimer using Show-Message
-    Show-Message "Disclaimer: You are running this script at your own risk."
-    Write-Host "`n"
-    $confirmation = Read-Host "Please type 'Y' to confirm: "
-    if ($confirmation -ne 'Y') {
-        Show-Error "User did not confirm. Exiting script."
-        exit
-    }
-
-    # Initialize the settings file
-    $settings = Initialize-Settings
-
-    # Main script loop
-    do {
-
-        $global:ErrorRecords = @()
-        $operationStatus = @()
-
-        $choice = Show-Menu    
-
-        $tasks = Initialize-Tasks -choice $choice -settings $settings
-
-        if ($tasks) {
-            Show-ProgressBar -Tasks $tasks -DelayBetweenTasks 2
+    $relaunch = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"{0}"' -f $PSCommandPath))
+    foreach ($kvp in $PSBoundParameters.GetEnumerator()) {
+        if ($kvp.Value -is [switch]) {
+            if ($kvp.Value.IsPresent) { $relaunch += "-$($kvp.Key)" }
+        }
+        elseif ($kvp.Value -is [array]) {
+            $relaunch += "-$($kvp.Key)"
+            $relaunch += (($kvp.Value | ForEach-Object { '"{0}"' -f $_ }) -join ',')
         }
         else {
-            Write-Host "Invalid selection. Please choose an option from the menu."
+            $relaunch += "-$($kvp.Key)"
+            $relaunch += ('"{0}"' -f $kvp.Value)
         }
-
-        if ($operationStatus) {       
-            foreach ($status in $operationStatus) {
-                if (-not ($status -is [int]) -and -not ($status -is [System.Int64])) {
-                    Write-Log -logFileName "completed" -message $status -functionName $MyInvocation.MyCommand.Name
-                }
-            }
-        }
-
-        if ($global:ErrorRecords.Count -gt 0) {    
-            foreach ($err in $global:ErrorRecords) {
-                if (-not ($status -is [int]) -and -not ($status -is [System.Int64])) {
-                    Write-Log -logFileName "errors" -message $status -functionName $MyInvocation.MyCommand.Name
-                }
-            }
-        }
-
-        Pause
-
-    } while ($true)
+    }
+    # -Wait/-PassThru so the caller's exit code reflects the elevated run instead of "launched OK".
+    $proc = Start-Process -FilePath $exe -Verb RunAs -ArgumentList $relaunch -PassThru -Wait
+    exit $proc.ExitCode
 }
+
+if ($RegisterScheduledTask) {
+    if ($PSCmdlet.ShouldProcess('Task Scheduler', "Register weekly 'WinDragon Maintenance Protocol' task")) {
+        Register-MaintenanceTask
+    }
+    return
+}
+
+# --- Dispatch ------------------------------------------------------------
+$script:HeadlessRun = $PSBoundParameters.ContainsKey('RunChoice') -or
+                      $PSBoundParameters.ContainsKey('Level') -or
+                      $PSBoundParameters.ContainsKey('OnlyTask')
+
+if (-not $script:HeadlessRun) {
+    Start-InteractiveMenu
+    return
+}
+
+if ($PSBoundParameters.ContainsKey('RunChoice')) {
+    $null = Invoke-MenuChoice -Choice $RunChoice
+    return
+}
+
+Start-MaintenanceRun

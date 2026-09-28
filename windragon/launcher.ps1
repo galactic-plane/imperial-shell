@@ -6,11 +6,11 @@ $asciiArt = @"
 | (__) || ()() || :\/: || :\/: |
 | '--'P|| '--'R|| '--'O|| '--'G|
 `------'`------'`------'`------'
-WinDragon GUI vBeta build 2025.03.07.01
+WinDragon GUI v2.0.0
 "@
 
 # Define the file path for winDragon.ps1
-$winDragonScriptPath = "d:/windragon/winDragon.ps1"
+$winDragonScriptPath = Join-Path $PSScriptRoot 'winDragon.ps1'
 
 # Display ASCII Art in Terminal
 Write-Host $asciiArt -ForegroundColor Cyan
@@ -120,14 +120,14 @@ $rowDef = New-Object System.Windows.Controls.RowDefinition
 $rowDef.Height = "Auto"
 $grid.RowDefinitions.Add($rowDef) | Out-Null
 
-# Create Buttons
-$buttonTitles = @(
-    "Repair Tasks",
-    "Update Software",
-    "Cleanup Tasks",
-    "Drive Optimization",
-    "System Information",
-    "Analyze Logs"
+# Create Buttons - each maps to a winDragon.ps1 -RunChoice menu number
+$buttonDefinitions = @(
+    @{ Title = "Audit (Read-Only)";    RunChoice = 1 },
+    @{ Title = "Quick Pass";           RunChoice = 2 },
+    @{ Title = "Standard Pass";        RunChoice = 3 },
+    @{ Title = "Full Pass";            RunChoice = 4 },
+    @{ Title = "List Task Catalogue";  RunChoice = 8 },
+    @{ Title = "Register Weekly Task"; RunChoice = 9 }
 )
 
 # Create Button Style
@@ -138,29 +138,22 @@ $buttonStyle.Setters.Add((New-Object System.Windows.Setter([System.Windows.Contr
 
 # Create Buttons
 $index = 0
-$buttonTitles | ForEach-Object -Process {
+$buttonDefinitions | ForEach-Object -Process {
     $button = New-Object System.Windows.Controls.Button
-    $button.Content = $_
+    $button.Content = $_.Title
     $button.Style = $buttonStyle
-    $button.Tag = $index  # Ensure the index is correctly stored in the button object
+    $button.Tag = $_.RunChoice
 
     # Define Button Click Action
     $button.Add_Click({
             param($btnSender, $customEventArgs)
-            $buttonIndex = $btnSender.Tag  # Retrieve the correct button index
+            $runChoice = [int]$btnSender.Tag
 
             $window.Dispatcher.Invoke([action] {
                     try {
                         Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
-                        switch ($buttonIndex) {
-                            0 { Start-Process pwsh -Verb RunAs -ArgumentList "-NoExit", "-File", $winDragonScriptPath, "-RunChoice", "2" -Wait }
-                            1 { Start-Process pwsh -Verb RunAs -ArgumentList "-NoExit", "-File", $winDragonScriptPath, "-RunChoice", "3" -Wait }
-                            2 { Start-Process pwsh -Verb RunAs -ArgumentList "-NoExit", "-File", $winDragonScriptPath, "-RunChoice", "4" -Wait }
-                            3 { Start-Process pwsh -Verb RunAs -ArgumentList "-NoExit", "-File", $winDragonScriptPath, "-RunChoice", "5" -Wait }
-                            4 { Start-Process pwsh -Verb RunAs -ArgumentList "-NoExit", "-File", $winDragonScriptPath, "-RunChoice", "6" -Wait }
-                            5 { Start-Process pwsh -Verb RunAs -ArgumentList "-NoExit", "-File", $winDragonScriptPath, "-RunChoice", "7" -Wait }
-                            Default { Write-Host "Invalid selection" -ForegroundColor Red }
-                        }
+                        Show-StatusMessage -message "launching winDragon -RunChoice $runChoice"
+                        Start-Process pwsh -Verb RunAs -ArgumentList "-NoExit", "-File", "`"$winDragonScriptPath`"", "-RunChoice", "$runChoice" -Wait
                     }
                     catch {
                         Write-Host "Error executing script: $_" -ForegroundColor Red

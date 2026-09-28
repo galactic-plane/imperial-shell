@@ -143,11 +143,10 @@ def combine_powershell_scripts(source_file, modules_folder, output_file):
                 # Construct the full path to the module using Path for better cross-platform compatibility
                 module_full_path = Path(modules_folder) / Path(module_path).name
                 if module_full_path.exists():
-                    # Read and clean lines from the module file
+                    # Read module lines verbatim, dropping only the line terminator (the output is
+                    # newline-joined, so keeping it would double-space here-strings).
                     module_lines = read_file(module_full_path)
-                    combined_script.extend(
-                        module_lines
-                    )  # Keep the original lines without cleaning them
+                    combined_script.extend(line.rstrip("\r\n") for line in module_lines)
             else:
                 # Clean and add the current line if it's not a module import
                 combined_script.extend(clean_lines([line]))
