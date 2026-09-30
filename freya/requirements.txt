@@ -1,0 +1,10 @@
+# Freya runtime dependencies. Installed into ~/.imperial-shell/venv (Python 3.12) by
+# setup-imperial-shell.ps1. PyAudio (microphone input) is installed separately as optional.
+open-interpreter>=0.4.3,<0.5
+edge-tts>=6.1
+pygame>=2.5
+SpeechRecognition>=3.10
+colorama>=0.4.6
+requests>=2.31
+# open-interpreter still imports pkg_resources, which newer setuptools releases drop.
+setuptools<81
