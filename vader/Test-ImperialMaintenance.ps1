@@ -446,6 +446,28 @@ Test-Case 'Explicit parameters override the script-scope OnlyTask/SkipTask defau
     Assert-False (Test-TaskSelected -Task $script:FakeTask) 'default (script-scope) should not match'
     Assert-True (Test-TaskSelected -Task $script:FakeTask -OnlyTask @('DISM*') -SkipTask $null) 'explicit override should match'
 }
+Test-Case '-OnlyTask overrides the level rank but never lets Audit run a mutating task' {
+    $savedRo = $script:ReadOnlyRun; $savedRank = $script:CurrentRank
+    try {
+        $mutating = [pscustomobject]@{ Name = 'System Restore Point'; MinLevel = 3; ReadOnly = $false }
+        $script:ReadOnlyRun = $false; $script:CurrentRank = 1
+        Assert-True (Test-TaskSelected -Task $mutating -OnlyTask @('System Restore*') -SkipTask $null) 'OnlyTask should beat the level rank'
+        $script:ReadOnlyRun = $true; $script:CurrentRank = 2
+        Assert-False (Test-TaskSelected -Task $mutating -OnlyTask @('System Restore*') -SkipTask $null) 'Audit ran a mutating task via -OnlyTask'
+    } finally { $script:ReadOnlyRun = $savedRo; $script:CurrentRank = $savedRank }
+}
+
+#endregion
+
+#region ------------------------------------------------------------------- Elevation relaunch
+
+Write-TestSection 'Elevation relaunch'
+
+Test-Case 'Relaunch uses an encoded command so arrays and trailing backslashes survive' {
+    $text = Get-Content -LiteralPath $ScriptUnderTest -Raw
+    Assert-Match $text "'-EncodedCommand'" 'relaunch argument list'
+    Assert-False ($text.Contains("'Bypass', '-File'")) 'relaunch still uses -File'
+}
 
 #endregion
 
@@ -823,6 +845,12 @@ if (Get-Command Get-MpComputerStatus -ErrorAction SilentlyContinue) {
 } else {
     Skip-Case 'Invoke-DefenderTask reads status without mutating anything in Audit mode' 'Defender cmdlets unavailable (third-party AV?)'
 }
+Test-Case 'Invoke-DefenderTask is Skipped (not Failed) when Defender is disabled behind third-party AV' {
+    function Get-MpComputerStatus { [CmdletBinding()] param() throw '0x800106ba service not running' }
+    $r = Invoke-DefenderTask
+    Assert-Equal $r.Status 'Skipped' 'status'
+    Assert-Match $r.Detail 'Defender unavailable' 'detail'
+}
 
 #endregion
 
@@ -854,6 +882,14 @@ Test-Case 'Invoke-PowerConfigTask returns a well-formed result' {
 Test-Case 'Invoke-StartupImpactTask returns a well-formed result' {
     $r = Invoke-StartupImpactTask
     Assert-True ($r.Status -in @('OK', 'Warning')) 'expected a well-formed status'
+}
+Test-Case 'Invoke-StartupImpactTask tolerates a Run key that exists but holds no values' {
+    function Test-Path { [CmdletBinding()] param([Parameter(Position = 0)]$Path) $true }
+    function Get-ItemProperty { [CmdletBinding()] param($Path) }
+    function Get-ScheduledTask { [CmdletBinding()] param() }
+    $r = Invoke-StartupImpactTask
+    Assert-Equal $r.Status 'OK' 'status'
+    Assert-Equal $r.Detail '0 startup entries' 'detail'
 }
 Test-Case 'Invoke-StorageSenseReportTask returns a well-formed result' {
     $r = Invoke-StorageSenseReportTask

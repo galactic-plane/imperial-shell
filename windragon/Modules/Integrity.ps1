@@ -28,8 +28,8 @@ function Invoke-DismHealthChain {
     if (-not $useModule) {
         $r = Invoke-NativeCommand -FilePath 'dism.exe' -ArgumentList @('/Online', '/Cleanup-Image', '/CheckHealth')
         if ($r.Output -match 'No component store corruption detected') { $state = 'Healthy' }
-        elseif ($r.Output -match 'repairable')                          { $state = 'Repairable' }
-        elseif ($r.Output -match 'not repairable')                      { $state = 'NonRepairable' }
+        elseif ($r.Output -match 'is repairable')                      { $state = 'Repairable' }
+        elseif ($r.Output -match 'not repairable')                     { $state = 'NonRepairable' }
     }
     Write-Info "          Result: $state"
 
@@ -80,7 +80,8 @@ function Invoke-DismHealthChain {
     }
     $restore = Invoke-NativeCommand -FilePath 'dism.exe' -ArgumentList $dismArgs
 
-    if ($restore.ExitCode -in 0, 3010 -and $restore.Output -match 'completed successfully') {
+    # Exit code, not the localized console text, decides success.
+    if ($restore.ExitCode -in 0, 3010) {
         Write-Good 'RestoreHealth completed successfully.'
         if ($restore.ExitCode -eq 3010) { Write-Warn 'A restart is required to finish this repair.' }
         $script:RebootNeeded = $true

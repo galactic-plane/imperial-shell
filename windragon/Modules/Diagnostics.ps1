@@ -193,6 +193,7 @@ function Invoke-StartupImpactTask {
     foreach ($k in $runKeys) {
         if (-not (Test-Path $k)) { continue }
         $props = Get-ItemProperty -Path $k -ErrorAction SilentlyContinue
+        if (-not $props) { continue }   # key exists but holds no values
         foreach ($p in $props.PSObject.Properties) {
             if ($p.Name -like 'PS*') { continue }
             $entries.Add([pscustomobject]@{ Hive = $k.Split('\')[0]; Name = $p.Name; Command = $p.Value }) | Out-Null

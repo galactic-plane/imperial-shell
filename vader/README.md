@@ -57,7 +57,7 @@ Invoke-ImperialMaintenance.ps1
 |---|---|
 | `-Level` | `Audit` (read-only) / `Quick` / `Standard` (default) / `Full`. Controls which tasks run. |
 | `-SkipTask <string[]>` | Task names or wildcards to skip. See `-ListTasks`. |
-| `-OnlyTask <string[]>` | Run only the named tasks (wildcards allowed). Overrides `-Level` selection. |
+| `-OnlyTask <string[]>` | Run only the named tasks (wildcards allowed). Overrides `-Level` selection, but `-Level Audit` still never runs a task that modifies the system. |
 | `-ListTasks` | Print the task catalogue and exit. No elevation required. |
 | `-InstallWindowsUpdates` | Download and install pending Windows Updates (default is scan-only). |
 | `-UpgradeApps` | Run `winget upgrade --all` (winget source + `msstore` source, so Microsoft Store apps are covered too). Skipped automatically under SYSTEM. |

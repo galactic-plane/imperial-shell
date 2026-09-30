@@ -136,8 +136,8 @@ function Invoke-CleanupTask {
     if ($script:CurrentRank -ge 3 -and -not (Test-IsSystemAccount)) {
         $iconPath = "$env:LOCALAPPDATA\Microsoft\Windows\Explorer"
         if (Test-Path $iconPath) {
-            $stale = Get-ChildItem -LiteralPath $iconPath -Filter 'iconcache*' -Force -ErrorAction SilentlyContinue
-            $stale += Get-ChildItem -LiteralPath $iconPath -Filter 'thumbcache*' -Force -ErrorAction SilentlyContinue
+            $stale = @(Get-ChildItem -LiteralPath $iconPath -Filter 'iconcache*' -Force -ErrorAction SilentlyContinue)
+            $stale += @(Get-ChildItem -LiteralPath $iconPath -Filter 'thumbcache*' -Force -ErrorAction SilentlyContinue)
             $cacheBytes = ($stale | Measure-Object -Property Length -Sum).Sum
             if ($cacheBytes) {
                 Write-Info ("  {0,-38} {1,8} MB (rebuilt on next Explorer start)" -f 'Icon/thumbnail cache', (ConvertTo-Mb $cacheBytes))

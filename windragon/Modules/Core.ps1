@@ -220,6 +220,8 @@ function Test-TaskSelected {
         [string[]]$SkipTask = $SkipTask
     )
 
+    # Audit stays read-only even when -OnlyTask names a mutating task.
+    if ($script:ReadOnlyRun -and -not $Task.ReadOnly) { return $false }
     if ($OnlyTask) {
         foreach ($pattern in $OnlyTask) { if ($Task.Name -like $pattern) { return $true } }
         return $false
@@ -227,7 +229,6 @@ function Test-TaskSelected {
     if ($SkipTask) {
         foreach ($pattern in $SkipTask) { if ($Task.Name -like $pattern) { return $false } }
     }
-    if ($script:ReadOnlyRun -and -not $Task.ReadOnly) { return $false }
     if ($Task.MinLevel -gt $script:CurrentRank) { return $false }
     return $true
 }

@@ -51,7 +51,8 @@ function Invoke-WindowsUpdateTask {
     $downloader = $session.CreateUpdateDownloader()
     $downloader.Updates = $toInstall
     $dl = $downloader.Download()
-    if ($dl.ResultCode -ne 2) {
+    # 2 = succeeded, 3 = succeeded with errors (install whatever did download).
+    if ($dl.ResultCode -notin 2, 3) {
         return @{ Status = 'Failed'; Detail = "Download result code $($dl.ResultCode)" }
     }
 
@@ -135,7 +136,7 @@ function Invoke-WingetTask {
 
     Write-Info 'Listing upgradable packages (all sources)...'
     $list = Invoke-NativeCommand -FilePath $winget.Source -ArgumentList @(
-        'upgrade', '--all', '--include-unknown', '--accept-source-agreements', '--disable-interactivity')
+        'upgrade', '--include-unknown', '--accept-source-agreements', '--disable-interactivity')
     Write-Host $list.Output -ForegroundColor Gray
 
     Write-Info 'Upgrading winget-source packages...'

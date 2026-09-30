@@ -42,7 +42,11 @@ After the disclaimer, the menu offers:
 | 10 | Exit | |
 
 Options 5 and 6 run at the "level for custom runs" shown in the menu header (default Standard).
-Options 1-4 are one-shot passes and don't change that setting.
+Options 1-4 are one-shot passes and don't change that setting. With the level set to Audit,
+options 5 and 6 skip any picked task that would modify the system, exactly like vader.
+
+In a host that cannot prompt (`-NonInteractive`, a service session) the menu is not shown and
+the script runs unattended with the given parameters, exactly like vader.
 
 **Options menu** - toggles and values that apply to every run started from the menu:
 
@@ -92,7 +96,7 @@ the vader script:
 |---|---|
 | `-Level` | `Audit` (read-only) / `Quick` / `Standard` (default) / `Full`. |
 | `-SkipTask <string[]>` | Task names or wildcards to skip. |
-| `-OnlyTask <string[]>` | Run only the named tasks (wildcards allowed). Overrides `-Level` selection. |
+| `-OnlyTask <string[]>` | Run only the named tasks (wildcards allowed). Overrides `-Level` selection, but `-Level Audit` still never runs a task that modifies the system. |
 | `-ListTasks` | Print the task catalogue and exit. |
 | `-InstallWindowsUpdates` | Download and install pending Windows Updates (default is scan-only). |
 | `-UpgradeApps` | `winget upgrade --all` against the `winget` and `msstore` sources. Skipped under SYSTEM. |

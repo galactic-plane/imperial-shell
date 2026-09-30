@@ -48,7 +48,8 @@
     One or more task names (or wildcards) to skip. See -ListTasks.
 
 .PARAMETER OnlyTask
-    Run only the named tasks (wildcards allowed). Overrides -Level selection.
+    Run only the named tasks (wildcards allowed). Overrides -Level selection, but -Level Audit
+    still never runs a task that modifies the system.
 
 .PARAMETER ListTasks
     Print the task catalogue and exit.
@@ -372,6 +373,8 @@ function Test-TaskSelected {
         [string[]]$SkipTask = $SkipTask
     )
 
+    # Audit stays read-only even when -OnlyTask names a mutating task.
+    if ($script:ReadOnlyRun -and -not $Task.ReadOnly) { return $false }
     if ($OnlyTask) {
         foreach ($pattern in $OnlyTask) { if ($Task.Name -like $pattern) { return $true } }
         return $false
@@ -379,7 +382,6 @@ function Test-TaskSelected {
     if ($SkipTask) {
         foreach ($pattern in $SkipTask) { if ($Task.Name -like $pattern) { return $false } }
     }
-    if ($script:ReadOnlyRun -and -not $Task.ReadOnly) { return $false }
     if ($Task.MinLevel -gt $script:CurrentRank) { return $false }
     return $true
 }
@@ -652,8 +654,8 @@ function Invoke-DismHealthChain {
     if (-not $useModule) {
         $r = Invoke-NativeCommand -FilePath 'dism.exe' -ArgumentList @('/Online', '/Cleanup-Image', '/CheckHealth')
         if ($r.Output -match 'No component store corruption detected') { $state = 'Healthy' }
-        elseif ($r.Output -match 'repairable')                          { $state = 'Repairable' }
-        elseif ($r.Output -match 'not repairable')                      { $state = 'NonRepairable' }
+        elseif ($r.Output -match 'is repairable')                      { $state = 'Repairable' }
+        elseif ($r.Output -match 'not repairable')                     { $state = 'NonRepairable' }
     }
     Write-Info "          Result: $state"
 
@@ -704,7 +706,8 @@ function Invoke-DismHealthChain {
     }
     $restore = Invoke-NativeCommand -FilePath 'dism.exe' -ArgumentList $dismArgs
 
-    if ($restore.ExitCode -in 0, 3010 -and $restore.Output -match 'completed successfully') {
+    # Exit code, not the localized console text, decides success.
+    if ($restore.ExitCode -in 0, 3010) {
         Write-Good 'RestoreHealth completed successfully.'
         if ($restore.ExitCode -eq 3010) { Write-Warn 'A restart is required to finish this repair.' }
         $script:RebootNeeded = $true
@@ -1128,7 +1131,8 @@ function Invoke-WindowsUpdateTask {
     $downloader = $session.CreateUpdateDownloader()
     $downloader.Updates = $toInstall
     $dl = $downloader.Download()
-    if ($dl.ResultCode -ne 2) {
+    # 2 = succeeded, 3 = succeeded with errors (install whatever did download).
+    if ($dl.ResultCode -notin 2, 3) {
         return @{ Status = 'Failed'; Detail = "Download result code $($dl.ResultCode)" }
     }
 
@@ -1212,7 +1216,7 @@ function Invoke-WingetTask {
 
     Write-Info 'Listing upgradable packages (all sources)...'
     $list = Invoke-NativeCommand -FilePath $winget.Source -ArgumentList @(
-        'upgrade', '--all', '--include-unknown', '--accept-source-agreements', '--disable-interactivity')
+        'upgrade', '--include-unknown', '--accept-source-agreements', '--disable-interactivity')
     Write-Host $list.Output -ForegroundColor Gray
 
     Write-Info 'Upgrading winget-source packages...'
@@ -1304,7 +1308,9 @@ function Invoke-DefenderTask {
         return @{ Status = 'Skipped'; Detail = 'Defender cmdlets unavailable (third-party AV?)' }
     }
 
-    $status = Get-MpComputerStatus
+    # The cmdlets exist but throw when Defender is disabled/passive behind third-party AV.
+    try   { $status = Get-MpComputerStatus -ErrorAction Stop }
+    catch { return @{ Status = 'Skipped'; Detail = "Defender unavailable: $($_.Exception.Message)" } }
     Write-Info ("Antimalware engine : {0}" -f $status.AMEngineVersion)
     Write-Info ("Signature version  : {0} (age {1} days)" -f $status.AntivirusSignatureVersion, $status.AntivirusSignatureAge)
     Write-Info ("Real-time protection: {0}   Tamper protection: {1}" -f $status.RealTimeProtectionEnabled, $status.IsTamperProtected)
@@ -1529,8 +1535,8 @@ function Invoke-CleanupTask {
     if ($script:CurrentRank -ge 3 -and -not (Test-IsSystemAccount)) {
         $iconPath = "$env:LOCALAPPDATA\Microsoft\Windows\Explorer"
         if (Test-Path $iconPath) {
-            $stale = Get-ChildItem -LiteralPath $iconPath -Filter 'iconcache*' -Force -ErrorAction SilentlyContinue
-            $stale += Get-ChildItem -LiteralPath $iconPath -Filter 'thumbcache*' -Force -ErrorAction SilentlyContinue
+            $stale = @(Get-ChildItem -LiteralPath $iconPath -Filter 'iconcache*' -Force -ErrorAction SilentlyContinue)
+            $stale += @(Get-ChildItem -LiteralPath $iconPath -Filter 'thumbcache*' -Force -ErrorAction SilentlyContinue)
             $cacheBytes = ($stale | Measure-Object -Property Length -Sum).Sum
             if ($cacheBytes) {
                 Write-Info ("  {0,-38} {1,8} MB (rebuilt on next Explorer start)" -f 'Icon/thumbnail cache', (ConvertTo-Mb $cacheBytes))
@@ -1810,6 +1816,7 @@ function Invoke-StartupImpactTask {
     foreach ($k in $runKeys) {
         if (-not (Test-Path $k)) { continue }
         $props = Get-ItemProperty -Path $k -ErrorAction SilentlyContinue
+        if (-not $props) { continue }   # key exists but holds no values
         foreach ($p in $props.PSObject.Properties) {
             if ($p.Name -like 'PS*') { continue }
             $entries.Add([pscustomobject]@{ Hive = $k.Split('\')[0]; Name = $p.Name; Command = $p.Value }) | Out-Null
@@ -1905,7 +1912,7 @@ function Write-HtmlReport {
     $html = @"
 <!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8">
-<title>Imperial Maintenance Report - $($snap.ComputerName)</title>
+<title>Imperial Maintenance Report - $(ConvertTo-HtmlSafe $snap.ComputerName)</title>
 <style>
   body { background:#0d1117; color:#c9d1d9; font-family:'Segoe UI',system-ui,sans-serif; margin:0; padding:32px; }
   h1 { color:#f85149; font-size:24px; margin:0 0 4px; letter-spacing:1px; }
@@ -1923,16 +1930,16 @@ function Write-HtmlReport {
   code { background:#161b22; padding:1px 5px; border-radius:4px; color:#79c0ff; }
 </style></head><body>
 <h1>IMPERIAL MAINTENANCE PROTOCOL</h1>
-<div class="sub">$($snap.ComputerName) &nbsp;|&nbsp; $($script:StartTime.ToString('yyyy-MM-dd HH:mm:ss')) &nbsp;|&nbsp; level: $Level &nbsp;|&nbsp; duration: $duration min &nbsp;|&nbsp; script v$($script:ScriptVersion)</div>
+<div class="sub">$(ConvertTo-HtmlSafe $snap.ComputerName) &nbsp;|&nbsp; $($script:StartTime.ToString('yyyy-MM-dd HH:mm:ss')) &nbsp;|&nbsp; level: $Level &nbsp;|&nbsp; duration: $duration min &nbsp;|&nbsp; script v$($script:ScriptVersion)</div>
 
 <h2>System</h2>
 <div class="kv">
-  <div>Operating system</div><div>$($snap.Caption) $($snap.DisplayVersion) (build $($snap.FullBuild))</div>
-  <div>Edition</div><div>$($snap.Edition)</div>
-  <div>Hardware</div><div>$($snap.Manufacturer) $($snap.Model)</div>
-  <div>Processor</div><div>$($snap.Cpu) &mdash; $($snap.Cores)C / $($snap.Threads)T</div>
+  <div>Operating system</div><div>$(ConvertTo-HtmlSafe "$($snap.Caption) $($snap.DisplayVersion) (build $($snap.FullBuild))")</div>
+  <div>Edition</div><div>$(ConvertTo-HtmlSafe $snap.Edition)</div>
+  <div>Hardware</div><div>$(ConvertTo-HtmlSafe "$($snap.Manufacturer) $($snap.Model)")</div>
+  <div>Processor</div><div>$(ConvertTo-HtmlSafe $snap.Cpu) &mdash; $($snap.Cores)C / $($snap.Threads)T</div>
   <div>Memory</div><div>$($snap.MemoryGb) GB</div>
-  <div>Firmware</div><div>$($snap.BiosVersion)</div>
+  <div>Firmware</div><div>$(ConvertTo-HtmlSafe $snap.BiosVersion)</div>
   <div>Uptime at start</div><div>$($snap.UptimeHours) hours</div>
   <div>PowerShell</div><div>$($snap.PowerShell)</div>
   <div>Restart required</div><div>$(if ($script:RebootNeeded) { '<strong style="color:#d29922">YES</strong>' } else { 'No' })</div>
@@ -2105,20 +2112,21 @@ if (-not (Test-Elevated)) {
     $exe = (Get-Process -Id $PID).Path
     if (-not $exe) { $exe = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" }
 
-    $relaunch = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"{0}"' -f $PSCommandPath))
+    # -File cannot bind arrays ('a','b' arrives as one string) and mangles a trailing backslash,
+    # so rebuild the call as single-quoted PowerShell and pass it as an encoded command.
+    $command = "& '{0}'" -f ($PSCommandPath -replace "'", "''")
     foreach ($kvp in $PSBoundParameters.GetEnumerator()) {
         if ($kvp.Value -is [switch]) {
-            if ($kvp.Value.IsPresent) { $relaunch += "-$($kvp.Key)" }
-        }
-        elseif ($kvp.Value -is [array]) {
-            $relaunch += "-$($kvp.Key)"
-            $relaunch += (($kvp.Value | ForEach-Object { '"{0}"' -f $_ }) -join ',')
+            $command += " -$($kvp.Key):`$$([bool]$kvp.Value)"
         }
         else {
-            $relaunch += "-$($kvp.Key)"
-            $relaunch += ('"{0}"' -f $kvp.Value)
+            $values = @($kvp.Value | ForEach-Object { "'{0}'" -f ("$_" -replace "'", "''") })
+            $command += " -$($kvp.Key) $($values -join ',')"
         }
     }
+    $command += '; exit $LASTEXITCODE'
+    $relaunch = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-EncodedCommand',
+                  [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command)))
     # -Wait/-PassThru so the caller's exit code reflects the elevated run instead of "launched OK".
     $proc = Start-Process -FilePath $exe -Verb RunAs -ArgumentList $relaunch -PassThru -Wait
     exit $proc.ExitCode

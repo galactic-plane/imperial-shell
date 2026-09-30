@@ -12,7 +12,9 @@ function Invoke-DefenderTask {
         return @{ Status = 'Skipped'; Detail = 'Defender cmdlets unavailable (third-party AV?)' }
     }
 
-    $status = Get-MpComputerStatus
+    # The cmdlets exist but throw when Defender is disabled/passive behind third-party AV.
+    try   { $status = Get-MpComputerStatus -ErrorAction Stop }
+    catch { return @{ Status = 'Skipped'; Detail = "Defender unavailable: $($_.Exception.Message)" } }
     Write-Info ("Antimalware engine : {0}" -f $status.AMEngineVersion)
     Write-Info ("Signature version  : {0} (age {1} days)" -f $status.AntivirusSignatureVersion, $status.AntivirusSignatureAge)
     Write-Info ("Real-time protection: {0}   Tamper protection: {1}" -f $status.RealTimeProtectionEnabled, $status.IsTamperProtected)

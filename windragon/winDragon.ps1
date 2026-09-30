@@ -11,7 +11,8 @@
 # Privileges: Administrator required (self-elevates unless -NoElevatePrompt).
 #
 # How to run
-#   Interactive menu (default when none of -RunChoice / -Level / -OnlyTask is given):
+#   Interactive menu (default when none of -RunChoice / -Level / -OnlyTask is given and the host
+#   can prompt; a -NonInteractive or service host runs unattended instead):
 #     .\winDragon.ps1
 #     Any switch passed on the command line (e.g. -UpgradeApps) pre-sets the matching menu option.
 #
@@ -133,20 +134,21 @@ if (-not (Test-Elevated)) {
     $exe = (Get-Process -Id $PID).Path
     if (-not $exe) { $exe = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" }
 
-    $relaunch = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"{0}"' -f $PSCommandPath))
+    # -File cannot bind arrays ('a','b' arrives as one string) and mangles a trailing backslash,
+    # so rebuild the call as single-quoted PowerShell and pass it as an encoded command.
+    $command = "& '{0}'" -f ($PSCommandPath -replace "'", "''")
     foreach ($kvp in $PSBoundParameters.GetEnumerator()) {
         if ($kvp.Value -is [switch]) {
-            if ($kvp.Value.IsPresent) { $relaunch += "-$($kvp.Key)" }
-        }
-        elseif ($kvp.Value -is [array]) {
-            $relaunch += "-$($kvp.Key)"
-            $relaunch += (($kvp.Value | ForEach-Object { '"{0}"' -f $_ }) -join ',')
+            $command += " -$($kvp.Key):`$$([bool]$kvp.Value)"
         }
         else {
-            $relaunch += "-$($kvp.Key)"
-            $relaunch += ('"{0}"' -f $kvp.Value)
+            $values = @($kvp.Value | ForEach-Object { "'{0}'" -f ("$_" -replace "'", "''") })
+            $command += " -$($kvp.Key) $($values -join ',')"
         }
     }
+    $command += '; exit $LASTEXITCODE'
+    $relaunch = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-EncodedCommand',
+                  [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command)))
     # -Wait/-PassThru so the caller's exit code reflects the elevated run instead of "launched OK".
     $proc = Start-Process -FilePath $exe -Verb RunAs -ArgumentList $relaunch -PassThru -Wait
     exit $proc.ExitCode
@@ -160,9 +162,13 @@ if ($RegisterScheduledTask) {
 }
 
 # --- Dispatch ------------------------------------------------------------
+# A host that cannot prompt (-NonInteractive, service session) runs unattended exactly like vader.
+$script:CanPrompt = [Environment]::UserInteractive -and
+                    -not @([Environment]::GetCommandLineArgs() | Where-Object { $_ -match '^[-/]noni' }).Count
 $script:HeadlessRun = $PSBoundParameters.ContainsKey('RunChoice') -or
                       $PSBoundParameters.ContainsKey('Level') -or
-                      $PSBoundParameters.ContainsKey('OnlyTask')
+                      $PSBoundParameters.ContainsKey('OnlyTask') -or
+                      -not $script:CanPrompt
 
 if (-not $script:HeadlessRun) {
     Start-InteractiveMenu

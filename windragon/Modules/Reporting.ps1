@@ -46,7 +46,7 @@ function Write-HtmlReport {
     $html = @"
 <!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8">
-<title>WinDragon Maintenance Report - $($snap.ComputerName)</title>
+<title>WinDragon Maintenance Report - $(ConvertTo-HtmlSafe $snap.ComputerName)</title>
 <style>
   body { background:#0d1117; color:#c9d1d9; font-family:'Segoe UI',system-ui,sans-serif; margin:0; padding:32px; }
   h1 { color:#f85149; font-size:24px; margin:0 0 4px; letter-spacing:1px; }
@@ -64,16 +64,16 @@ function Write-HtmlReport {
   code { background:#161b22; padding:1px 5px; border-radius:4px; color:#79c0ff; }
 </style></head><body>
 <h1>WINDRAGON MAINTENANCE PROTOCOL</h1>
-<div class="sub">$($snap.ComputerName) &nbsp;|&nbsp; $($script:StartTime.ToString('yyyy-MM-dd HH:mm:ss')) &nbsp;|&nbsp; level: $Level &nbsp;|&nbsp; duration: $duration min &nbsp;|&nbsp; script v$($script:ScriptVersion)</div>
+<div class="sub">$(ConvertTo-HtmlSafe $snap.ComputerName) &nbsp;|&nbsp; $($script:StartTime.ToString('yyyy-MM-dd HH:mm:ss')) &nbsp;|&nbsp; level: $Level &nbsp;|&nbsp; duration: $duration min &nbsp;|&nbsp; script v$($script:ScriptVersion)</div>
 
 <h2>System</h2>
 <div class="kv">
-  <div>Operating system</div><div>$($snap.Caption) $($snap.DisplayVersion) (build $($snap.FullBuild))</div>
-  <div>Edition</div><div>$($snap.Edition)</div>
-  <div>Hardware</div><div>$($snap.Manufacturer) $($snap.Model)</div>
-  <div>Processor</div><div>$($snap.Cpu) &mdash; $($snap.Cores)C / $($snap.Threads)T</div>
+  <div>Operating system</div><div>$(ConvertTo-HtmlSafe "$($snap.Caption) $($snap.DisplayVersion) (build $($snap.FullBuild))")</div>
+  <div>Edition</div><div>$(ConvertTo-HtmlSafe $snap.Edition)</div>
+  <div>Hardware</div><div>$(ConvertTo-HtmlSafe "$($snap.Manufacturer) $($snap.Model)")</div>
+  <div>Processor</div><div>$(ConvertTo-HtmlSafe $snap.Cpu) &mdash; $($snap.Cores)C / $($snap.Threads)T</div>
   <div>Memory</div><div>$($snap.MemoryGb) GB</div>
-  <div>Firmware</div><div>$($snap.BiosVersion)</div>
+  <div>Firmware</div><div>$(ConvertTo-HtmlSafe $snap.BiosVersion)</div>
   <div>Uptime at start</div><div>$($snap.UptimeHours) hours</div>
   <div>PowerShell</div><div>$($snap.PowerShell)</div>
   <div>Restart required</div><div>$(if ($script:RebootNeeded) { '<strong style="color:#d29922">YES</strong>' } else { 'No' })</div>

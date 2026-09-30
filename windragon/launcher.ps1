@@ -151,9 +151,9 @@ $buttonDefinitions | ForEach-Object -Process {
 
             $window.Dispatcher.Invoke([action] {
                     try {
-                        Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
                         Show-StatusMessage -message "launching winDragon -RunChoice $runChoice"
-                        Start-Process pwsh -Verb RunAs -ArgumentList "-NoExit", "-File", "`"$winDragonScriptPath`"", "-RunChoice", "$runChoice" -Wait
+                        # No -Wait: with -NoExit it would freeze this window until the console is closed.
+                        Start-Process pwsh -Verb RunAs -ArgumentList "-NoExit", "-ExecutionPolicy", "Bypass", "-File", "`"$winDragonScriptPath`"", "-RunChoice", "$runChoice"
                     }
                     catch {
                         Write-Host "Error executing script: $_" -ForegroundColor Red

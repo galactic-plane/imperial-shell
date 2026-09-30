@@ -378,6 +378,16 @@ Test-Case 'Unattended dispatch keys off -RunChoice, -Level or -OnlyTask' {
     foreach ($k in 'RunChoice', 'Level', 'OnlyTask') { Assert-Match $text "PSBoundParameters\.ContainsKey\('$k'\)" 'dispatch block' }
 }
 
+Test-Case 'A non-interactive host runs unattended instead of opening the menu' {
+    Assert-Match (Get-Content -LiteralPath $script:MainScript -Raw) '-not \$script:CanPrompt' 'dispatch block'
+}
+
+Test-Case 'Elevation relaunch uses an encoded command so arrays and trailing backslashes survive' {
+    $text = Get-Content -LiteralPath $script:MainScript -Raw
+    Assert-Match $text "'-EncodedCommand'" 'relaunch argument list'
+    Assert-False ($text.Contains("'Bypass', '-File'")) 'relaunch still uses -File'
+}
+
 #endregion
 
 #region ------------------------------------------------------------------- Feature parity with vader
@@ -617,10 +627,12 @@ Test-Case '-SkipTask wildcard excludes the matching task' {
     Reset-RunState
     Assert-False (Test-TaskSelected -Task $script:FakeTask -OnlyTask $null -SkipTask @('DISM*')) 'expected excluded'
 }
-Test-Case '-OnlyTask overrides level and audit filtering' {
-    Reset-RunState -RunLevel 'Audit'
+Test-Case '-OnlyTask overrides the level rank but never lets Audit run a mutating task' {
     $mutating = [pscustomobject]@{ Name = 'Component Store Cleanup'; MinLevel = 3; ReadOnly = $false }
-    Assert-True (Test-TaskSelected -Task $mutating -OnlyTask @('Component*') -SkipTask $null) 'OnlyTask should win'
+    Reset-RunState -RunLevel 'Quick'
+    Assert-True (Test-TaskSelected -Task $mutating -OnlyTask @('Component*') -SkipTask $null) 'OnlyTask should beat the level rank'
+    Reset-RunState -RunLevel 'Audit'
+    Assert-False (Test-TaskSelected -Task $mutating -OnlyTask @('Component*') -SkipTask $null) 'Audit ran a mutating task via -OnlyTask'
 }
 Test-Case 'Audit excludes mutating tasks; Quick excludes MinLevel 2+' {
     $mutating = [pscustomobject]@{ Name = 'x'; MinLevel = 1; ReadOnly = $false }
@@ -776,6 +788,9 @@ Test-Case 'DISM: RestoreHealth success (0/3010), 0x800F081F and -DismSource hand
         New-CallLog; Reset-RunState; $script:FakeExit = 3010; $script:FakeOut = 'The restore operation completed successfully.'
         Assert-Equal (Invoke-DismHealthChain).Status 'Repaired' '3010 status'
         Assert-True $script:RebootNeeded 'RebootNeeded after 3010'
+
+        New-CallLog; Reset-RunState; $script:FakeExit = 0; $script:FakeOut = 'Der Wiederherstellungsvorgang wurde erfolgreich abgeschlossen.'
+        Assert-Equal (Invoke-DismHealthChain).Status 'Repaired' 'localized success (exit 0)'
 
         New-CallLog; Reset-RunState; $script:FakeExit = 1; $script:FakeOut = 'Error: 0x800f081f The source files could not be found.'
         $r = Invoke-DismHealthChain -DismSource 'D:\sources\install.wim:1'
@@ -1008,6 +1023,9 @@ Test-Case 'Windows Update: install success, reboot flag, partial and download fa
     Assert-Equal (Invoke-WindowsUpdateTask -InstallWindowsUpdates).Detail 'Installed with errors' 'partial'
     Reset-RunState; $script:FakeSession = New-FakeWuSession -Updates $script:FakeUpdates -DownloadCode 4
     Assert-Equal (Invoke-WindowsUpdateTask -InstallWindowsUpdates).Status 'Failed' 'download failure'
+    Reset-RunState; $script:FakeSession = New-FakeWuSession -Updates $script:FakeUpdates -DownloadCode 3
+    Assert-Equal (Invoke-WindowsUpdateTask -InstallWindowsUpdates).Status 'Repaired' 'partial download still installs'
+    Assert-True $script:FakeSession.State.Installed 'install skipped after a partial download'
 }
 Test-Case 'Windows Update stack repair: not requested and WhatIf touch nothing' {
     function Stop-Service { [CmdletBinding()] param($Name, [switch]$Force) Add-Call 'stop' $Name }
@@ -1052,6 +1070,7 @@ if (Get-Command winget.exe -ErrorAction SilentlyContinue) {
             Assert-Equal (Invoke-WingetTask -UpgradeApps).Status 'Repaired' 'status'
             $argLines = @(Get-Call 'native' | ForEach-Object { $_.Data -join ' ' })
             Assert-Match $argLines[0] '^source update' 'first call'
+            Assert-Equal (@($argLines | Where-Object { $_ -match '--all' -and $_ -notmatch '--silent' }).Count) 0 'listing call must not upgrade (--all without --silent)'
             Assert-True (@($argLines | Where-Object { $_ -match '--silent' -and $_ -notmatch 'msstore' }).Count -eq 1) 'winget-source upgrade call'
             Assert-True (@($argLines | Where-Object { $_ -match '--source msstore' -and $_ -match '--include-unknown' }).Count -eq 1) 'msstore upgrade call'
             New-CallLog; $script:FakeExit = 1
@@ -1114,6 +1133,13 @@ Test-Case 'Defender: Audit reads status only; stale signatures / RTP off / detec
     $r = Invoke-DefenderTask -WhatIf
     Assert-Equal $r.Status 'Warning' 'status'
     Assert-Match $r.Detail 'real-time protection off; signatures 5 days old; 1 recent detections' 'detail'
+}
+Test-Case 'Defender: Skipped (not Failed) when Defender is disabled behind third-party AV' {
+    function Get-MpComputerStatus { [CmdletBinding()] param() throw '0x800106ba service not running' }
+    Reset-RunState
+    $r = Invoke-DefenderTask
+    Assert-Equal $r.Status 'Skipped' 'status'
+    Assert-Match $r.Detail 'Defender unavailable' 'detail'
 }
 Test-Case 'Security posture: nominal vs firewall/BitLocker/HVCI gaps' {
     function Get-NetFirewallProfile { [CmdletBinding()] param() @(
@@ -1316,6 +1342,15 @@ Test-Case 'Startup impact: more than 15 Run entries is a warning' {
     Reset-RunState
     Assert-Equal (Invoke-StartupImpactTask).Detail '16 startup entries' 'detail'
 }
+Test-Case 'Startup impact: a Run key with no values does not fail the task (StrictMode regression)' {
+    function Test-Path { [CmdletBinding()] param([Parameter(Position = 0)]$Path) $true }
+    function Get-ItemProperty { [CmdletBinding()] param($Path) }
+    function Get-ScheduledTask { [CmdletBinding()] param() @() }
+    Reset-RunState
+    $r = Invoke-StartupImpactTask
+    Assert-Equal $r.Status 'OK' 'status'
+    Assert-Equal $r.Detail '0 startup entries' 'detail'
+}
 Test-Case 'Pending reboot: zero, one (StrictMode regression) and multiple reasons' {
     Set-Item Function:\Get-PendingRebootDetail -Value { return @() }
     Reset-RunState
@@ -1351,6 +1386,17 @@ Test-Case 'Write-HtmlReport writes a WinDragon report with escaped task and find
     Assert-Match $html '&lt;script&gt;' 'escaped task'
     Assert-Match $html 'Finding &lt;b&gt;bold&lt;/b&gt;' 'escaped finding'
     Assert-False ($html -match '<script>') 'unescaped script tag'
+    Remove-Item (Split-Path $path) -Recurse -Force
+}
+Test-Case 'Write-HtmlReport escapes firmware/WMI-sourced system fields' {
+    Reset-RunState
+    $script:Snapshot = New-FakeSnapshot
+    $script:Snapshot.Model = '<img src=x onerror=alert(1)>'
+    $path = Join-Path (New-TempDir) 'r.html'
+    Write-HtmlReport -Path $path
+    $html = Get-Content -LiteralPath $path -Raw
+    Assert-Match $html '&lt;img src=x onerror=alert\(1\)&gt;' 'escaped model'
+    Assert-False ($html -match '<img') 'unescaped model markup'
     Remove-Item (Split-Path $path) -Recurse -Force
 }
 Test-Case 'Write-RunSummary renders without throwing (with and without findings / reboot)' {
