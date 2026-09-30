@@ -52,7 +52,7 @@ the script runs unattended with the given parameters, exactly like vader.
 
 | Option | Parameter |
 |---|---|
-| Install pending Windows Updates | `-InstallWindowsUpdates` |
+| Install Windows Updates (incl. optional) | `-InstallWindowsUpdates` |
 | Upgrade apps (winget + Microsoft Store) | `-UpgradeApps` |
 | Run a Defender quick scan | `-IncludeDefenderScan` |
 | Schedule CHKDSK /R at next boot | `-ScheduleChkdsk` |
@@ -98,7 +98,7 @@ the vader script:
 | `-SkipTask <string[]>` | Task names or wildcards to skip. |
 | `-OnlyTask <string[]>` | Run only the named tasks (wildcards allowed). Overrides `-Level` selection, but `-Level Audit` still never runs a task that modifies the system. |
 | `-ListTasks` | Print the task catalogue and exit. |
-| `-InstallWindowsUpdates` | Download and install pending Windows Updates (default is scan-only). |
+| `-InstallWindowsUpdates` | Download and install pending Windows Updates, including optional ones (preview cumulative updates, optional drivers, optional feature updates). Default is scan-only. |
 | `-UpgradeApps` | `winget upgrade --all` against the `winget` and `msstore` sources. Skipped under SYSTEM. |
 | `-IncludeDefenderScan` | Run a Microsoft Defender quick scan (signatures always refresh). |
 | `-ScheduleChkdsk` | Schedule `autochk /r` at next boot for volumes the scan reports as dirty. |

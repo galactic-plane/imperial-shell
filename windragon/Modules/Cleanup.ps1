@@ -132,7 +132,7 @@ function Invoke-CleanupTask {
         try { Clear-DnsClientCache -ErrorAction Stop; Write-Info ("  {0,-38} {1}" -f 'DNS client cache', 'flushed') } catch { }
     }
 
-    # Font cache / icon cache rebuild is Full-level only because it restarts Explorer.
+    # Icon/thumbnail cache is only measured, never deleted: Explorer holds it open while running.
     if ($script:CurrentRank -ge 3 -and -not (Test-IsSystemAccount)) {
         $iconPath = "$env:LOCALAPPDATA\Microsoft\Windows\Explorer"
         if (Test-Path $iconPath) {
@@ -140,7 +140,7 @@ function Invoke-CleanupTask {
             $stale += @(Get-ChildItem -LiteralPath $iconPath -Filter 'thumbcache*' -Force -ErrorAction SilentlyContinue)
             $cacheBytes = ($stale | Measure-Object -Property Length -Sum).Sum
             if ($cacheBytes) {
-                Write-Info ("  {0,-38} {1,8} MB (rebuilt on next Explorer start)" -f 'Icon/thumbnail cache', (ConvertTo-Mb $cacheBytes))
+                Write-Info ("  {0,-38} {1,8} MB (size only - not deleted)" -f 'Icon/thumbnail cache', (ConvertTo-Mb $cacheBytes))
             }
         }
     }

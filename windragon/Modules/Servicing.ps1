@@ -15,7 +15,8 @@ function Invoke-WindowsUpdateTask {
 
     Write-Info 'Scanning Windows Update (this can take a few minutes)...'
     $searcher = $session.CreateUpdateSearcher()
-    $searchResult = $searcher.Search("IsInstalled=0 and IsHidden=0")
+    # BrowseOnly is explicit on both sides so optional updates are always part of the result.
+    $searchResult = $searcher.Search("IsInstalled=0 and IsHidden=0 and BrowseOnly=0 or IsInstalled=0 and IsHidden=0 and BrowseOnly=1")
     $updates = @($searchResult.Updates)
 
     if ($updates.Count -eq 0) {

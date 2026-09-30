@@ -28,7 +28,7 @@
                            PowerShell module/help refresh, optional Windows Update stack repair.
         6.  Security     - Defender platform/signature update, quick scan, firewall, BitLocker,
                            Secure Boot / TPM posture.
-        7.  Cleanup      - temp, WER, shader/thumb caches, Delivery Optimization, SoftwareDistribution,
+        7.  Cleanup      - temp, WER, shader cache, Delivery Optimization, Windows Update download cache,
                            Recycle Bin, DNS cache, optional Disk Cleanup (cleanmgr) profile.
         8.  Diagnostics  - critical/error event review, bugcheck + minidump review, driver problems,
                            WMI repository verification, pending-reboot detection.
@@ -41,8 +41,8 @@
     Audit    - read-only. Diagnoses and reports, changes nothing. Safe to run any time.
     Quick    - fast health pass: DISM CheckHealth, disk health, temp cleanup, update scan.
     Standard - default. Full DISM repair chain, SFC, storage optimization, cleanup, diagnostics.
-    Full     - Standard plus component store cleanup, SoftwareDistribution purge, icon/thumb cache
-               rebuild, deeper log pruning.
+    Full     - Standard plus component store cleanup, Windows Update download cache purge, deeper
+               log pruning, sleep study, and an icon/thumbnail cache size report (not deleted).
 
 .PARAMETER SkipTask
     One or more task names (or wildcards) to skip. See -ListTasks.
@@ -55,7 +55,9 @@
     Print the task catalogue and exit.
 
 .PARAMETER InstallWindowsUpdates
-    Download and install pending Windows Updates. Without this the script only scans and reports.
+    Download and install pending Windows Updates, including optional ones (preview cumulative
+    updates, optional drivers and any optional feature update Windows Update offers). Without
+    this the script only scans and reports.
 
 .PARAMETER UpgradeApps
     Run 'winget upgrade --all' (winget source + msstore source, so Microsoft Store apps are
@@ -1095,7 +1097,8 @@ function Invoke-WindowsUpdateTask {
 
     Write-Info 'Scanning Windows Update (this can take a few minutes)...'
     $searcher = $session.CreateUpdateSearcher()
-    $searchResult = $searcher.Search("IsInstalled=0 and IsHidden=0")
+    # BrowseOnly is explicit on both sides so optional updates are always part of the result.
+    $searchResult = $searcher.Search("IsInstalled=0 and IsHidden=0 and BrowseOnly=0 or IsInstalled=0 and IsHidden=0 and BrowseOnly=1")
     $updates = @($searchResult.Updates)
 
     if ($updates.Count -eq 0) {
@@ -1531,7 +1534,7 @@ function Invoke-CleanupTask {
         try { Clear-DnsClientCache -ErrorAction Stop; Write-Info ("  {0,-38} {1}" -f 'DNS client cache', 'flushed') } catch { }
     }
 
-    # Font cache / icon cache rebuild is Full-level only because it restarts Explorer.
+    # Icon/thumbnail cache is only measured, never deleted: Explorer holds it open while running.
     if ($script:CurrentRank -ge 3 -and -not (Test-IsSystemAccount)) {
         $iconPath = "$env:LOCALAPPDATA\Microsoft\Windows\Explorer"
         if (Test-Path $iconPath) {
@@ -1539,7 +1542,7 @@ function Invoke-CleanupTask {
             $stale += @(Get-ChildItem -LiteralPath $iconPath -Filter 'thumbcache*' -Force -ErrorAction SilentlyContinue)
             $cacheBytes = ($stale | Measure-Object -Property Length -Sum).Sum
             if ($cacheBytes) {
-                Write-Info ("  {0,-38} {1,8} MB (rebuilt on next Explorer start)" -f 'Icon/thumbnail cache', (ConvertTo-Mb $cacheBytes))
+                Write-Info ("  {0,-38} {1,8} MB (size only - not deleted)" -f 'Icon/thumbnail cache', (ConvertTo-Mb $cacheBytes))
             }
         }
     }

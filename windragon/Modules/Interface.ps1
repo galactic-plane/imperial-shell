@@ -96,7 +96,7 @@ function Get-MainMenuItem {
 
 function Get-SwitchOptionDefinition {
     @(
-        [pscustomobject]@{ Kind = 'Switch';     Name = 'InstallWindowsUpdates';    Flag = '-InstallWindowsUpdates';    Label = 'Install pending Windows Updates' }
+        [pscustomobject]@{ Kind = 'Switch';     Name = 'InstallWindowsUpdates';    Flag = '-InstallWindowsUpdates';    Label = 'Install Windows Updates (incl. optional)' }
         [pscustomobject]@{ Kind = 'Switch';     Name = 'UpgradeApps';              Flag = '-UpgradeApps';              Label = 'Upgrade apps (winget + Microsoft Store)' }
         [pscustomobject]@{ Kind = 'Switch';     Name = 'IncludeDefenderScan';      Flag = '-IncludeDefenderScan';      Label = 'Run a Defender quick scan' }
         [pscustomobject]@{ Kind = 'Switch';     Name = 'ScheduleChkdsk';           Flag = '-ScheduleChkdsk';           Label = 'Schedule CHKDSK /R at next boot' }

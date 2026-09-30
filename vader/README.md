@@ -59,7 +59,7 @@ Invoke-ImperialMaintenance.ps1
 | `-SkipTask <string[]>` | Task names or wildcards to skip. See `-ListTasks`. |
 | `-OnlyTask <string[]>` | Run only the named tasks (wildcards allowed). Overrides `-Level` selection, but `-Level Audit` still never runs a task that modifies the system. |
 | `-ListTasks` | Print the task catalogue and exit. No elevation required. |
-| `-InstallWindowsUpdates` | Download and install pending Windows Updates (default is scan-only). |
+| `-InstallWindowsUpdates` | Download and install pending Windows Updates, including optional ones (preview cumulative updates, optional drivers, optional feature updates). Default is scan-only. |
 | `-UpgradeApps` | Run `winget upgrade --all` (winget source + `msstore` source, so Microsoft Store apps are covered too). Skipped automatically under SYSTEM. |
 | `-IncludeDefenderScan` | Run a Microsoft Defender quick scan (signatures always refresh regardless). |
 | `-ScheduleChkdsk` | Schedule `autochk /r` at next boot for any volume the scan reports as dirty. |

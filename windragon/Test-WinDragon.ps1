@@ -996,6 +996,10 @@ Test-Case 'Windows Update: no pending updates -> OK' {
     Reset-RunState; $script:FakeSession = New-FakeWuSession
     Assert-Equal (Invoke-WindowsUpdateTask).Status 'OK' 'status'
 }
+Test-Case 'Windows Update: search explicitly includes optional (BrowseOnly) updates' {
+    $text = (Get-FunctionDefinition -Files $script:AllFiles | Where-Object { $_.Name -eq 'Invoke-WindowsUpdateTask' }).Ast.Extent.Text
+    Assert-Match $text 'BrowseOnly=0 or IsInstalled=0 and IsHidden=0 and BrowseOnly=1' 'search criteria'
+}
 Test-Case 'Windows Update: pending updates are reported but not installed by default or in Audit' {
     . $script:WuMock
     Reset-RunState; $script:FakeSession = New-FakeWuSession -Updates $script:FakeUpdates
